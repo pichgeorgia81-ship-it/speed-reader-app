@@ -1,0 +1,132 @@
+/* =========================
+   Тема и общие переменные
+========================= */
+:root {
+  --bg-color: #f5f5f5;
+  --text-color: #111;
+
+  --button-bg: #e0e0e0;
+  --button-text: #111;
+
+  /* Активное состояние кнопок (синий) */
+  --button-bg-active: #2563eb;
+  --button-text-active: #ffffff;
+
+  /* Типографика */
+  --font-family: system-ui, Avenir, Helvetica, Arial, sans-serif;
+}
+
+/* Тёмная тема переключается классом .dark на body */
+body.dark {
+  --bg-color: #111;
+  --text-color: #f5f5f5;
+
+  --button-bg: #333;
+  --button-text: #f5f5f5;
+}
+
+/* =========================
+   База страницы
+========================= */
+html, body {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
+  display: flex;
+  place-items: center;
+
+  background-color: var(--bg-color);
+  color: var(--text-color);
+
+  font-family: var(--font-family);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+/* Ссылки */
+a {
+  font-weight: 500;
+  color: #646cff;
+  text-decoration: none;
+}
+a:hover {
+  color: #535bf2;
+}
+
+/* =========================
+   Кнопки
+   (убраны конфликтующие дубликаты и !important)
+========================= */
+button {
+  background-color: var(--button-bg);
+  color: var(--button-text);
+  border: none;
+  border-radius: 8px;
+
+  padding: 0.6em 1.2em;
+  font-size: 1em;
+  font-weight: 500;
+  font-family: inherit;
+
+  cursor: pointer;
+  transition:
+    background-color 0.3s,
+    color 0.3s,
+    border-color 0.25s,
+    box-shadow 0.25s;
+
+  margin-bottom: 8px; /* вертикальный ритм */
+}
+
+button + button { margin-left: 8px; }
+
+button:hover { background-color: #bdbdbd; }
+
+button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* Доступность */
+button:focus-visible {
+  outline: 2px solid #3b82f6;
+  outline-offset: 2px;
+}
+
+/* Активные (включённые) режимы: используем aria-pressed="true" или .is-active */
+button[aria-pressed="true"],
+button.is-active {
+  background-color: var(--button-bg-active);
+  color: var(--button-text-active);
+}
+
+/* Опционально: если хотите подсвечивать работающий «Старт»:
+button[data-state="running"] {
+  background-color: var(--button-bg-active);
+  color: var(--button-text-active);
+}
+*/
+
+/* =========================
+   Формы/инпуты (минимально)
+========================= */
+input,
+select {
+  font-family: inherit;
+  font-size: 1rem;
+}
+
+/* Слайдер лучше не перекрашивать жёстко — пусть берёт accent из HTML;
+   если нужно, можно добавить класс и стилизовать точечно. */
+
+/* =========================
+   Светлая системная схема (не ломаем темы)
+========================= */
+@media (prefers-color-scheme: light) {
+  /* Ничего не переопределяем глобально, чтобы не конфликтовать с body.dark и :root */
+}

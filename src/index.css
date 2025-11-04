@@ -130,3 +130,96 @@ select {
 @media (prefers-color-scheme: light) {
   /* Ничего не переопределяем глобально, чтобы не конфликтовать с body.dark и :root */
 }
+/* Базовый стиль кнопок */
+.btn {
+  padding: 10px 16px;
+  font-size: 16px;
+  border-radius: 12px;
+  line-height: 1;
+}
+
+.controls-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+}
+
+.mini-panel {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+@media (max-width: 768px) {
+  .btn {
+    padding: 6px 10px;
+    font-size: 14px;
+    border-radius: 10px;
+  }
+
+  .controls-row {
+    gap: 8px;
+  }
+
+  .wpm-input {
+    display: none;
+  }
+
+  .compactable {
+    gap: 8px;
+  }
+}
+
+@media (max-width: 420px) {
+  .btn {
+    padding: 5px 8px;
+    font-size: 13px;
+    border-radius: 8px;
+  }
+}
+/* ===============================
+   Иконки темы (солнышко/луна)
+   =============================== */
+.icon-emoji {
+  display: inline-flex;
+  width: 1.2em;
+  height: 1.2em;
+  align-items: center;
+  justify-content: center;
+  margin-right: 8px;
+  line-height: 1;
+  font-size: 1.1em; /* чуть крупнее текста */
+}
+/* ===== Компактное выравнивание панели управления ===== */
+
+/* Меньше расстояние между рядами */
+.controls-row {
+  margin-top: 4px !important;
+  margin-bottom: 4px !important;
+}
+
+/* Кнопки плотнее друг к другу по вертикали */
+button {
+  margin-bottom: 4px !important;
+}
+
+/* Мини-панель — чуть плотнее */
+.mini-panel {
+  gap: 8px !important;
+}
+
+/* Снижаем вертикальные отступы между логическими блоками */
+footer .mb-4 {
+  margin-bottom: 6px !important;
+}
+
+/* На маленьких экранах делаем ещё компактнее */
+@media (max-width: 768px) {
+  .controls-row {
+    gap: 6px !important;
+  }
+  button {
+    margin-bottom: 3px !important;
+  }
+}

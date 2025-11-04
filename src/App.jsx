@@ -1,6 +1,19 @@
 import React, { useEffect, useState, useRef, useCallback } from "react";
 import JSZip from "jszip";
 
+import * as Unrar from "node-unrar-js";
+import unrarWasmUrl from "node-unrar-js/esm/js/unrar.wasm?url";
+
+// Совместимые хелперы (под разные версии)
+const createExtractorFromData =
+  Unrar.createExtractorFromData || Unrar.default?.createExtractorFromData;
+const setOptions =
+  Unrar.setOptions || Unrar.default?.setOptions;
+
+// Передаём URL wasm (если метод доступен)
+setOptions?.({ wasmBinaryUrl: unrarWasmUrl });
+
+
 /* =============================
    IndexedDB (без авторизации)
 ============================= */
@@ -216,7 +229,7 @@ function BooksView({ books, onFileUpload, onOpenBook, onDeleteBook, isDark, togg
           <input
             ref={fileRef}
             type="file"
-            accept=".fb2,.zip"
+            accept=".fb2,.zip,.rar"
             className="hidden"
             onChange={async (e) => {
               if (e.target.files?.[0]) {
@@ -315,9 +328,26 @@ function ReadingView({ readerProps, onBack, onSeek, isDark, toggleTheme }) {
     jumpToPosition,
   } = readerProps;
 
+  // НОВОЕ: состояние компактного режима
+  const [isCompactUI, setIsCompactUI] = React.useState(false);
+
+  // Настройки для изменения скорости
+  const WPM_MIN = 60;
+  const WPM_MAX = 1200;
+  const WPM_STEP = 10;
+
+  const clamp = (n, min, max) => Math.max(min, Math.min(max, n));
+  const decWpm = () => setWpm(prev => clamp(prev - WPM_STEP, WPM_MIN, WPM_MAX));
+  const incWpm = () => setWpm(prev => clamp(prev + WPM_STEP, WPM_MIN, WPM_MAX));
+// ---- Символов (ширина текста) ----
+const CHAR_MIN = 10;
+const CHAR_MAX = 100;
+const CHAR_STEP = 5;
+const decChars = () => setCharLimit(v => Math.max(CHAR_MIN, v - CHAR_STEP));
+const incChars = () => setCharLimit(v => Math.min(CHAR_MAX, v + CHAR_STEP));
   /* ===== Константы тренировки ===== */
   const TRAIN_MIN = 10;
-  const TRAIN_MAX = 650;
+  const TRAIN_MAX = 550;
   const TRAIN_STEP = 10;
   const TRAIN_EVERY_PAIRS = 3; // каждые 3 пары (6 слов)
 
@@ -368,6 +398,40 @@ function ReadingView({ readerProps, onBack, onSeek, isDark, toggleTheme }) {
       });
     }, msPerPair);
   }, [stopPairTimer, wpm, words.length]);
+// ==== Fullscreen helpers ====
+const [isFullscreen, setIsFullscreen] = React.useState(false);
+
+const reqFullscreen = (el) =>
+  (el.requestFullscreen || el.webkitRequestFullscreen || el.msRequestFullscreen)?.call(el);
+
+const exitFullscreen = () =>
+  (document.exitFullscreen || document.webkitExitFullscreen || document.msExitFullscreen)?.call(document);
+
+React.useEffect(() => {
+  const onChange = () =>
+    setIsFullscreen(!!(document.fullscreenElement || document.webkitFullscreenElement));
+  document.addEventListener("fullscreenchange", onChange);
+  document.addEventListener("webkitfullscreenchange", onChange);
+  return () => {
+    document.removeEventListener("fullscreenchange", onChange);
+    document.removeEventListener("webkitfullscreenchange", onChange);
+  };
+}, []);
+
+const toggleFullscreen = () => {
+  const el = document.documentElement; // можно поменять на контейнер ридера
+  if (document.fullscreenElement || document.webkitFullscreenElement) {
+    exitFullscreen();
+  } else {
+    reqFullscreen(el)?.catch(() => {
+      // На некоторых версиях iOS Safari настоящий fullscreen недоступен внутри браузера
+      if (/iPhone|iPad|iPod/i.test(navigator.userAgent)) {
+        // Мягкая подсказка, если не удалось
+        console.info("Совет: Добавьте приложение на экран Домой (Поделиться → На экран Домой) для настоящего полноэкранного режима.");
+      }
+    });
+  }
+};
 
   /* ===== Вход/выход «Угол зрения» ===== */
   React.useEffect(() => {
@@ -465,22 +529,6 @@ function ReadingView({ readerProps, onBack, onSeek, isDark, toggleTheme }) {
     transformOrigin: "50% 50%",
   };
 
-  /* ===== Маскировка гласных ===== */
-  const VOWEL_RE = /[АЕЁИОУЫЭЮЯаеёиоуыэюяAEIOUYaeiouy]/;
-  const renderWithHiddenVowels = (text) => (
-    <span aria-label="text-with-hidden-vowels">
-      {Array.from(text).map((ch, i) => {
-        const isVowel = VOWEL_RE.test(ch);
-        const base = { display: "inline-block", lineHeight: 1.2, minWidth: "0.6ch" };
-        return (
-          <span key={i} style={isVowel ? { ...base, color: "#aaa" } : base}>
-            {isVowel ? "·" : ch}
-          </span>
-        );
-      })}
-    </span>
-  );
-
   /* ===== Старт/Пауза ===== */
   const handleStartPause = React.useCallback(() => {
     if (isAngleMode) {
@@ -496,7 +544,7 @@ function ReadingView({ readerProps, onBack, onSeek, isDark, toggleTheme }) {
     const { words, charLimit, jumpToPosition, setIsPlaying } = readerProps;
     if (!words || words.length === 0) return;
 
-    const clamp = (v, min, max) => Math.max(min, Math.min(max, v));
+    const clampLocal = (v, min, max) => Math.max(min, Math.min(max, v));
 
     const getNextChunkStart = (pos) => {
       let next = pos, total = 0;
@@ -523,10 +571,10 @@ function ReadingView({ readerProps, onBack, onSeek, isDark, toggleTheme }) {
     const onKey = (e) => {
       // WPM вверх/вниз — везде
       if (e.code === "ArrowUp") {
-        e.preventDefault(); setWpm((w) => clamp(w + 10, 20, 1000)); return;
+        e.preventDefault(); setWpm((w) => clampLocal(w + 10, 20, 1000)); return;
       }
       if (e.code === "ArrowDown") {
-        e.preventDefault(); setWpm((w) => clamp(w - 10, 20, 1000)); return;
+        e.preventDefault(); setWpm((w) => clampLocal(w - 10, 20, 1000)); return;
       }
 
       // Пробел — пуск/пауза
@@ -702,141 +750,164 @@ function ReadingView({ readerProps, onBack, onSeek, isDark, toggleTheme }) {
           </div>
         </div>
 
-        {/* Панель управления */}
-        <div
-          className={`w-full p-4 rounded-lg flex items-center justify-center gap-4 md:gap-6 flex-wrap shadow-lg transition-colors duration-300 ${
-            isDark ? "bg-gray-800 text-gray-100" : "bg-gray-200 text-gray-900"
-          }`}
+{/* Панель управления */}
+
+{/* Кнопка скрытия/показа меню */}
+<div className="controls-row" style={{ marginTop: 12 }}>
+  <button className="btn" onClick={() => setIsCompactUI(v => !v)}>
+    {isCompactUI ? "Показать меню" : "Скрыть меню"}
+  </button>
+
+  {/* Кнопка полноэкранного режима */}
+<button
+  className={btnClass(isFullscreen)}   // даст синий стиль
+  onClick={toggleFullscreen}
+  aria-pressed={isFullscreen}          // заодно корректная доступность
+>
+  {isFullscreen ? "Свернуть" : "Развернуть"}
+</button>
+
+
+</div>
+
+
+{/* === Компактный режим: только Старт + WPM === */}
+{isCompactUI && (
+  <div className="controls-row mini-panel" style={{ marginTop: 8 }}>
+  <button
+  className={btnClass(isAngleMode ? isPairPlaying : isPlaying)}
+  onClick={handleStartPause}
+  aria-pressed={isAngleMode ? isPairPlaying : isPlaying}
+>
+  {isAngleMode ? (isPairPlaying ? "Пауза" : "Старт") : (isPlaying ? "Пауза" : "Старт")}
+</button>
+
+
+    <div className="controls-row" style={{ alignItems: "center" }}>
+      <span>WPM:</span>
+      <button className="btn" onClick={decWpm}>–</button>
+      <strong>{wpm}</strong>
+      <button className="btn" onClick={incWpm}>+</button>
+    </div>
+  </div>
+)}
+
+{/* === Развернутый режим: порядок как на скрине === */}
+{!isCompactUI && (
+  <>
+    {/* 1-я строка: Вернуться | Тема | Старт */}
+    <div className="controls-row compactable" style={{ marginTop: 16 }}>
+      <button className="btn" onClick={onBack}>Вернуться</button>
+
+      <button className="btn" onClick={toggleTheme}>
+        <span className="icon-emoji" aria-hidden="true">
+          {isDark ? "🌞" : "🌙"}
+        </span>
+        {isDark ? "День" : "Ночь"}
+      </button>
+
+<button
+  className={btnClass(isAngleMode ? isPairPlaying : isPlaying)}
+  onClick={handleStartPause}
+  aria-pressed={isAngleMode ? isPairPlaying : isPlaying}
+>
+  {isAngleMode ? (isPairPlaying ? "Пауза" : "Старт") : (isPlaying ? "Пауза" : "Старт")}
+</button>
+
+    </div>
+
+    {/* 2-я строка: WPM */}
+    <div className="controls-row compactable" style={{ marginTop: 12 }}>
+      <span>WPM:</span>
+      <button className="btn" onClick={decWpm}>–</button>
+      <strong>{wpm}</strong>
+      <button className="btn" onClick={incWpm}>+</button>
+    </div>
+
+    {/* 3-я строка: Символов (только обычный режим) */}
+    {!isAngleMode && (
+      <div className="controls-row compactable" style={{ marginTop: 12 }}>
+        <span>Символов:</span>
+        <button className="btn" onClick={() => setCharLimit(v => Math.max(10, v - 5))}>–</button>
+        <strong>{charLimit}</strong>
+        <button className="btn" onClick={() => setCharLimit(v => Math.min(100, v + 5))}>+</button>
+      </div>
+    )}
+
+    {/* 4-я строка: Размер */}
+    <div className="controls-row compactable" style={{ marginTop: 12 }}>
+      <span>Размер:</span>
+      <button className="btn" onClick={() => setFontSize(v => Math.max(12, v - 2))}>–</button>
+      <strong>{fontSize}</strong>
+      <button className="btn" onClick={() => setFontSize(v => Math.min(120, v + 2))}>+</button>
+    </div>
+
+    {/* 5-я строка: тогглы */}
+    <div className="controls-row compactable" style={{ marginTop: 12, flexWrap: "wrap" }}>
+      <button onClick={() => setIsBold(b => !b)} className={btnClass(isBold)} aria-pressed={isBold}>
+        Жирный
+      </button>
+      <button onClick={() => setIsUpsideDown(v => !v)} className={btnClass(isUpsideDown)} aria-pressed={isUpsideDown}>
+        Вверх ногами
+      </button>
+
+      <button onClick={() => setHalfVisible(v => !v)} className={btnClass(halfVisible)} aria-pressed={halfVisible}>
+        Полтекста
+      </button>
+      <button
+        onClick={() => setShowGuide(v => !v)}
+        className={btnClass(showGuide)}
+        aria-pressed={showGuide}
+        title="Показать центральную линию"
+      >
+        Ориентир
+      </button>
+      <button
+        onClick={() => setIsAngleMode(m => !m)}
+        className={btnClass(isAngleMode)}
+        aria-pressed={isAngleMode}
+        title="Режим двух слов с зазором"
+      >
+        Угол зрения
+      </button>
+      <button
+        onClick={toggleTraining}
+        className={btnClass(isTraining)}
+        aria-pressed={isTraining}
+        title="Авто-изменение расстояния каждые 3 пары"
+      >
+        Тренировка
+      </button>
+    </div>
+
+    {/* 6-я строка: Расстояние для «Угол зрения» */}
+    {isAngleMode && (
+      <div className="flex items-center gap-3 mt-2">
+        <label className="text-sm">Расстояние:</label>
+        <button
+          onClick={() => setPairGap(g => Math.max(0, g - 10))}
+          className="w-8 h-8 rounded bg-gray-700"
+          title="Меньше"
         >
-          <button onClick={onBack} className="px-4 py-2 rounded bg-gray-600 hover:bg-gray-500">
-            Вернуться
-          </button>
+          -
+        </button>
+        <span className="w-24 text-center">{pairGap}px</span>
+        <button
+          onClick={() => setPairGap(g => Math.min(1200, g + 10))}
+          className="w-8 h-8 rounded bg-gray-700"
+          title="Больше"
+        >
+          +
+        </button>
+      </div>
+    )}
+  </>
+)}
 
-          <button onClick={toggleTheme} className={btnClass(false)}>
-            {isDark ? "☀️ День" : "🌙 Ночь"}
-          </button>
-
-          {/* Старт/Пауза — общий */}
-          <button
-            onClick={handleStartPause}
-            className="px-6 py-2 text-lg rounded bg-blue-600 text-white hover:bg-blue-500 w-28"
-          >
-            {(isAngleMode ? isPairPlaying : isPlaying) ? "Пауза" : "Старт"}
-          </button>
-
-          {/* WPM — всегда */}
-          <div className="flex items-center gap-3">
-            <label className="text-sm">WPM:</label>
-            <input
-              type="number"
-              min={20}
-              max={1000}
-              step={10}
-              value={wpm}
-              onChange={(e) => setWpm(Number(e.target.value))}
-              className="w-24 p-2 rounded bg-gray-700 text-center"
-            />
-          </div>
-
-          {/* Размер — всегда */}
-          <div className="flex items-center gap-3">
-            <label className="text-sm">Размер:</label>
-            <button onClick={() => setFontSize((s) => Math.max(12, s - 2))} className="w-8 h-8 rounded bg-gray-700">-</button>
-            <span className="w-10 text-center">{fontSize}</span>
-            <button onClick={() => setFontSize((s) => Math.min(128, s + 2))} className="w-8 h-8 rounded bg-gray-700">+</button>
-          </div>
-
-          {/* Символов — только обычный режим */}
-          {!isAngleMode && (
-            <div className="flex items-center gap-3">
-              <label className="text-sm">Символов:</label>
-              <select
-                value={charLimit}
-                onChange={(e) => setCharLimit(Number(e.target.value))}
-                className="p-2 rounded bg-gray-700"
-              >
-                {[10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60].map((n) => (
-                  <option key={n} value={n}>{n}</option>
-                ))}
-              </select>
-            </div>
-          )}
-
-          {/* Тогглы — активные = синие */}
-          <button onClick={() => setIsBold((b) => !b)} className={btnClass(isBold)} aria-pressed={isBold}>
-            Жирный
-          </button>
-
-          <button onClick={() => setIsUpsideDown((v) => !v)} className={btnClass(isUpsideDown)} aria-pressed={isUpsideDown}>
-            Вверх ногами
-          </button>
-
-          <button onClick={() => setHideVowels((v) => !v)} className={btnClass(hideVowels)} aria-pressed={hideVowels}>
-            Гласные
-          </button>
-
-          <button onClick={() => setHalfVisible((v) => !v)} className={btnClass(halfVisible)} aria-pressed={halfVisible}>
-            Полтекста
-          </button>
-
-          {/* Оптический ориентир */}
-          <button
-            onClick={() => setShowGuide((v) => !v)}
-            className={btnClass(showGuide)}
-            aria-pressed={showGuide}
-            title="Показать центральную линию"
-          >
-            Ориентир
-          </button>
-
-          {/* Переключатель «Угол зрения» */}
-          <button
-            onClick={() => setIsAngleMode((m) => !m)}
-            className={btnClass(isAngleMode)}
-            aria-pressed={isAngleMode}
-            title="Режим двух слов с зазором"
-          >
-            Угол зрения
-          </button>
-
-          {/* Тренировка (вкл/выкл) */}
-          <button
-            onClick={toggleTraining}
-            className={btnClass(isTraining)}
-            aria-pressed={isTraining}
-            title="Авто-изменение расстояния каждые 3 пары"
-          >
-            Тренировка
-          </button>
-
-          {/* Контролы расстояния — работают и в тренировке (ручной режим), шаг 10 px */}
-          {isAngleMode && (
-            <div className="flex items-center gap-3">
-              <label className="text-sm">Расстояние:</label>
-              <button
-                onClick={() => setPairGap((g) => Math.max(0, g - 10))}
-                className="w-8 h-8 rounded bg-gray-700"
-                title="Меньше"
-              >
-                -
-              </button>
-              <span className="w-24 text-center">{pairGap}px</span>
-              <button
-                onClick={() => setPairGap((g) => Math.min(1200, g + 10))}
-                className="w-8 h-8 rounded bg-gray-700"
-                title="Больше"
-              >
-                +
-              </button>
-            </div>
-          )}
-        </div>
       </footer>
     </div>
   );
 }
-
-
 
 
 
@@ -924,12 +995,43 @@ export default function SpeedReaderApp() {
   const handleFileUpload = useCallback(async (file) => {
     try {
       let arrayBuffer = await file.arrayBuffer();
-      if (/\.zip$/i.test(file.name)) {
-        const zip = await JSZip.loadAsync(arrayBuffer);
-        const fb2Name = Object.keys(zip.files).find((n) => /\.fb2$/i.test(n));
-        if (!fb2Name) throw new Error("ZIP не содержит .fb2 файлов");
-        arrayBuffer = await zip.files[fb2Name].async("arraybuffer");
-      }
+if (/\.zip$/i.test(file.name)) {
+  const zip = await JSZip.loadAsync(arrayBuffer);
+  const fb2Name = Object.keys(zip.files).find((n) => /\.fb2$/i.test(n));
+  if (!fb2Name) throw new Error("ZIP не содержит .fb2 файлов");
+  arrayBuffer = await zip.files[fb2Name].async("arraybuffer");
+
+} else if (/\.rar$/i.test(file.name)) {
+  // 1. Всегда подаём Uint8Array на вход
+  const u8Input = new Uint8Array(arrayBuffer);
+
+  // 2. Создаём extractor
+  if (typeof createExtractorFromData !== "function") {
+    throw new Error("RAR: createExtractorFromData недоступен (импорт не загрузился)");
+  }
+  const extractor = await createExtractorFromData({ data: u8Input });
+
+  // 3. Получаем список файлов в архиве и ищем первый .fb2
+  const { fileHeaders } = extractor.getFileList();
+  const fb2Header = fileHeaders.find(h => /\.fb2$/i.test(h.name));
+  if (!fb2Header) throw new Error("RAR не содержит .fb2 файлов");
+
+  // 4. Извлекаем именно этот .fb2
+  const { files } = extractor.extract({ files: [fb2Header.name] });
+  const fileEntry = files?.[0];
+
+  // 5. Берём содержимое из fileEntry.extraction (НЕ extracted)
+  const u8 = fileEntry?.extraction; // Uint8Array
+  if (!(u8 && u8.byteLength)) {
+    throw new Error("Не удалось извлечь .fb2 из RAR");
+  }
+
+  // 6. Превращаем его обратно в ArrayBuffer без «хвостов»
+  arrayBuffer = u8.buffer.slice(u8.byteOffset, u8.byteOffset + u8.byteLength);
+}
+
+
+
       const xmlText = decodeFB2(arrayBuffer);
       const plainText = parseFB2Text(xmlText);
 
@@ -940,7 +1042,7 @@ export default function SpeedReaderApp() {
         .split(/\s+/);
 
       const newBook = {
-        title: file.name.replace(/\.(fb2|zip)$/i, ""),
+        title: file.name.replace(/\.(fb2|zip|rar)$/i, ""),
         words: wordsArr,
         progress: 0,
         createdAt: new Date().toISOString(),
